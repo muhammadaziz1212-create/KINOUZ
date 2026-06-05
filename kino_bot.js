@@ -10,7 +10,7 @@ const ADMIN_ID = 8150061698;
 const DB_FILE = "movies.json";
 const USERS_FILE = "users.json";
 
-const bot = new TelegramBot(TOKEN, { polling: true });
+const bot = new TelegramBot(TOKEN, { polling: { interval: 1000, allowedUpdates: ["message", "callback_query"], skipOldUpdates: true } });
 
 // ===================== BAZA =====================
 function loadMovies() {
@@ -40,7 +40,6 @@ function getUserCount() {
 }
 
 const adminState = {};
-const processedMessages = new Set();
 
 function isAdmin(id) {
   return id === ADMIN_ID;
@@ -49,15 +48,7 @@ function isAdmin(id) {
 // ===================== /start =====================
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
-  const messageId = msg.message_id;
   const name = msg.from.first_name || "Do'st";
-
-  // Duplicate xabarni blokirovka qilish
-  const key = `${chatId}_${msg.text}`;
-  if (processedMessages.has(key)) return;
-  processedMessages.add(key);
-  
-  setTimeout(() => processedMessages.delete(key), 5000);
 
   saveUser(chatId, name);
 
