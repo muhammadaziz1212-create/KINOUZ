@@ -34,6 +34,7 @@ function saveUser(userId, name) {
   if (!users[userId]) {
     users[userId] = { name, joinedAt: new Date().toISOString() };
     fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), "utf8");
+    console.log(`✅ Yangi foydalanuvchi saqlandi: ${userId} - ${name}`);
   }
 }
 
@@ -47,10 +48,21 @@ function isAdmin(id) {
 
 const adminState = {};
 const broadcastState = {};
+const processedMessages = new Set();
 
 // ===================== /start =====================
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
+  const key = `start_${chatId}`;
+  
+  // Duplicate xabarni blokirovka qilish
+  if (processedMessages.has(key)) {
+    console.log(`⏭️ Duplikat /start blokiylandi: ${chatId}`);
+    return;
+  }
+  processedMessages.add(key);
+  setTimeout(() => processedMessages.delete(key), 2000);
+
   const name = msg.from.first_name || "Do'st";
   saveUser(chatId, name);
 
@@ -210,25 +222,39 @@ bot.on("message", (msg) => {
   if (isAdmin(chatId) && broadcastState[chatId]) {
     const messageText = msg.text;
     const users = loadUsers();
+    const userIds = Object.keys(users);
+
+    console.log(`📢 Broadcast boshlandi. Foydalanuvchilar: ${userIds.length} ta`);
+
     let sentCount = 0;
     let errorCount = 0;
+    let promises = [];
 
-    Object.keys(users).forEach((userId) => {
-      bot.sendMessage(userId, messageText, { parse_mode: "HTML" })
-        .then(() => { sentCount++; })
-        .catch((err) => { errorCount++; });
+    userIds.forEach((userId) => {
+      const promise = bot.sendMessage(userId, messageText, { parse_mode: "HTML" })
+        .then(() => {
+          sentCount++;
+          console.log(`✅ Habar yuborildi: ${userId}`);
+        })
+        .catch((err) => {
+          errorCount++;
+          console.error(`❌ Xato (${userId}): ${err.message}`);
+        });
+      promises.push(promise);
     });
 
-    setTimeout(() => {
+    Promise.all(promises).then(() => {
       delete broadcastState[chatId];
       bot.sendMessage(
         chatId,
-        `✅ <b>Habar yuborildi!</b>\n\n` +
+        `✅ <b>Broadcast tugadi!</b>\n\n` +
         `📤 Yuborilgan: <b>${sentCount}</b>\n` +
-        `❌ Xatolar: <b>${errorCount}</b>`,
+        `❌ Xatolar: <b>${errorCount}</b>\n` +
+        `👥 Jami: <b>${userIds.length}</b>`,
         { parse_mode: "HTML" }
       );
-    }, 1000);
+      console.log(`📊 Broadcast natija: ${sentCount} yuborildi, ${errorCount} xato`);
+    });
 
     return;
   }
