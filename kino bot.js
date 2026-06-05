@@ -1,35 +1,44 @@
 /**
- * 🎬 KINO BOT - Admin Panel bilan
- * O'rnatish: npm install node-telegram-bot-api
- * Ishga tushirish: node kino_bot.js
+ * 🎬 KINO BOT - Admin Panel + Foydalanuvchilar soni
  */
 
 const TelegramBot = require("node-telegram-bot-api");
 const fs = require("fs");
 
-// ===================== SOZLAMALAR =====================
 const TOKEN = "8897869307:AAEuqqCxs0oEH1SlzYICZJUFgpQJmJMb4pg";
 const ADMIN_ID = 8150061698;
 const DB_FILE = "movies.json";
+const USERS_FILE = "users.json";
 
 const bot = new TelegramBot(TOKEN, { polling: true });
 
 // ===================== BAZA =====================
 function loadMovies() {
   if (!fs.existsSync(DB_FILE)) return [];
-  try {
-    return JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
-  } catch {
-    return [];
-  }
+  try { return JSON.parse(fs.readFileSync(DB_FILE, "utf8")); } catch { return []; }
 }
 
 function saveMovies(movies) {
   fs.writeFileSync(DB_FILE, JSON.stringify(movies, null, 2), "utf8");
 }
 
-// ===================== ADMIN HOLATI =====================
-// adminState[chatId] = { step, data }
+function loadUsers() {
+  if (!fs.existsSync(USERS_FILE)) return {};
+  try { return JSON.parse(fs.readFileSync(USERS_FILE, "utf8")); } catch { return {}; }
+}
+
+function saveUser(userId, name) {
+  const users = loadUsers();
+  if (!users[userId]) {
+    users[userId] = { name, joinedAt: new Date().toISOString() };
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), "utf8");
+  }
+}
+
+function getUserCount() {
+  return Object.keys(loadUsers()).length;
+}
+
 const adminState = {};
 
 function isAdmin(id) {
@@ -41,10 +50,16 @@ bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   const name = msg.from.first_name || "Do'st";
 
+  saveUser(chatId, name);
+
   if (isAdmin(chatId)) {
+    const movies = loadMovies();
+    const users = getUserCount();
     bot.sendMessage(
       chatId,
       `👑 <b>Admin panelga xush kelibsiz, ${name}!</b>\n\n` +
+        `👥 Foydalanuvchilar: <b>${users} ta</b>\n` +
+        `🎬 Kinolar: <b>${movies.length} ta</b>\n\n` +
         `🎬 /addmovie — Kino qo'shish\n` +
         `📋 /list — Kinolar ro'yxati\n` +
         `🗑 /deletemovie — Kino o'chirish\n` +
@@ -99,9 +114,12 @@ bot.onText(/\/list/, (msg) => {
 bot.onText(/\/stats/, (msg) => {
   if (!isAdmin(msg.chat.id)) return;
   const movies = loadMovies();
+  const users = getUserCount();
   bot.sendMessage(
     msg.chat.id,
-    `📊 <b>Statistika</b>\n\n🎬 Kinolar soni: <b>${movies.length}</b>`,
+    `📊 <b>Statistika</b>\n\n` +
+      `👥 Foydalanuvchilar: <b>${users} ta</b>\n` +
+      `🎬 Kinolar soni: <b>${movies.length} ta</b>`,
     { parse_mode: "HTML" }
   );
 });
@@ -149,25 +167,18 @@ bot.on("message", (msg) => {
   if (msg.text && msg.text.startsWith("/")) return;
 
   const chatId = msg.chat.id;
+  const name = msg.from.first_name || "Do'st";
+  saveUser(chatId, name);
 
-  // ---- ADMIN HOLATI ----
   if (isAdmin(chatId) && adminState[chatId]) {
     const state = adminState[chatId];
 
-    // Video qabul qilish
     if (state.step === "video") {
       let fileId = null;
+      if (msg.video) fileId = msg.video.file_id;
+      else if (msg.document) fileId = msg.document.file_id;
+      else { bot.sendMessage(chatId, "⚠️ Iltimos, video yuboring!"); return; }
 
-      if (msg.video) {
-        fileId = msg.video.file_id;
-      } else if (msg.document) {
-        fileId = msg.document.file_id;
-      } else {
-        bot.sendMessage(chatId, "⚠️ Iltimos, video yuboring!");
-        return;
-      }
-
-      // Saqlash
       const movies = loadMovies();
       const newMovie = {
         id: Date.now(),
@@ -192,7 +203,6 @@ bot.on("message", (msg) => {
       return;
     }
 
-    // Matn qadamlari
     if (!msg.text) return;
 
     if (state.step === "title") {
@@ -202,13 +212,10 @@ bot.on("message", (msg) => {
         reply_markup: { inline_keyboard: [[{ text: "❌ Bekor qilish", callback_data: "cancel_add" }]] },
       });
     } else if (state.step === "year") {
-      if (!/^\d{4}$/.test(msg.text)) {
-        bot.sendMessage(chatId, "⚠️ To'g'ri yil yozing (masalan: 2024):");
-        return;
-      }
+      if (!/^\d{4}$/.test(msg.text)) { bot.sendMessage(chatId, "⚠️ To'g'ri yil yozing:"); return; }
       state.data.year = msg.text;
       state.step = "genre";
-      bot.sendMessage(chatId, "🎭 Janrini yozing (masalan: Triller, Drama):", {
+      bot.sendMessage(chatId, "🎭 Janrini yozing:", {
         reply_markup: { inline_keyboard: [[{ text: "❌ Bekor qilish", callback_data: "cancel_add" }]] },
       });
     } else if (state.step === "genre") {
@@ -223,21 +230,15 @@ bot.on("message", (msg) => {
       bot.sendMessage(
         chatId,
         `📹 <b>Videoni yuboring</b>\n\n` +
-          `✅ Nomi: ${state.data.title}\n` +
-          `📅 Yil: ${state.data.year}\n` +
-          `🎭 Janr: ${state.data.genre}\n` +
-          `📝 Tavsif: ${state.data.description}\n\n` +
+          `✅ Nomi: ${state.data.title}\n📅 Yil: ${state.data.year}\n` +
+          `🎭 Janr: ${state.data.genre}\n📝 Tavsif: ${state.data.description}\n\n` +
           `Endi kinoning video faylini yuboring:`,
-        {
-          parse_mode: "HTML",
-          reply_markup: { inline_keyboard: [[{ text: "❌ Bekor qilish", callback_data: "cancel_add" }]] },
-        }
+        { parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "❌ Bekor qilish", callback_data: "cancel_add" }]] } }
       );
     }
     return;
   }
 
-  // ---- FOYDALANUVCHI QIDIRRUVI ----
   if (!msg.text) return;
   const query = msg.text.trim().toLowerCase();
   const movies = loadMovies();
@@ -250,23 +251,15 @@ bot.on("message", (msg) => {
   );
 
   if (results.length === 0) {
-    bot.sendMessage(
-      chatId,
-      `😔 <b>"${msg.text}"</b> bo'yicha hech narsa topilmadi.\n\n/list — barcha kinolar`,
-      { parse_mode: "HTML" }
-    );
+    bot.sendMessage(chatId, `😔 <b>"${msg.text}"</b> bo'yicha hech narsa topilmadi.\n\n/list — barcha kinolar`, { parse_mode: "HTML" });
     return;
   }
 
-  if (results.length === 1) {
-    sendMovieCard(chatId, results[0]);
-    return;
-  }
+  if (results.length === 1) { sendMovieCard(chatId, results[0]); return; }
 
   const buttons = results.map((m) => [
     { text: `🎬 ${m.title} (${m.year})`, callback_data: `movie_${m.id}` },
   ]);
-
   bot.sendMessage(chatId, `🔍 <b>${results.length} ta natija:</b>`, {
     parse_mode: "HTML",
     reply_markup: { inline_keyboard: buttons },
@@ -280,11 +273,9 @@ function sendMovieCard(chatId, movie) {
     `🎭 Janr: ${movie.genre}\n` +
     `📝 ${movie.description}`;
 
-  const buttons = [[{ text: "▶️ Kinoni ko'rish", callback_data: `watch_${movie.id}` }]];
-
   bot.sendMessage(chatId, text, {
     parse_mode: "HTML",
-    reply_markup: { inline_keyboard: buttons },
+    reply_markup: { inline_keyboard: [[{ text: "▶️ Kinoni ko'rish", callback_data: `watch_${movie.id}` }]] },
   });
 }
 
@@ -294,7 +285,6 @@ bot.on("callback_query", (query) => {
   const data = query.data;
   const movies = loadMovies();
 
-  // Bekor qilish
   if (data === "cancel_add") {
     delete adminState[chatId];
     bot.answerCallbackQuery(query.id, { text: "Bekor qilindi" });
@@ -302,7 +292,6 @@ bot.on("callback_query", (query) => {
     return;
   }
 
-  // Kino ko'rish kartasi
   if (data.startsWith("movie_")) {
     const id = parseInt(data.replace("movie_", ""));
     const movie = movies.find((m) => m.id === id);
@@ -312,12 +301,10 @@ bot.on("callback_query", (query) => {
     return;
   }
 
-  // Video yuborish
   if (data.startsWith("watch_")) {
     const id = parseInt(data.replace("watch_", ""));
     const movie = movies.find((m) => m.id === id);
     if (!movie) return;
-
     bot.answerCallbackQuery(query.id, { text: "⏳ Yuborilmoqda..." });
     bot.sendVideo(chatId, movie.file_id, {
       caption: `🎬 <b>${movie.title}</b> (${movie.year})\n🎭 ${movie.genre}`,
@@ -326,27 +313,18 @@ bot.on("callback_query", (query) => {
     return;
   }
 
-  // Kino o'chirish
   if (data.startsWith("delete_")) {
     if (!isAdmin(chatId)) return;
     const id = parseInt(data.replace("delete_", ""));
     const index = movies.findIndex((m) => m.id === id);
     if (index === -1) return;
-
     const deleted = movies.splice(index, 1)[0];
     saveMovies(movies);
-
     bot.answerCallbackQuery(query.id, { text: "O'chirildi!" });
-    bot.sendMessage(chatId, `🗑 <b>${deleted.title}</b> o'chirildi.`, {
-      parse_mode: "HTML",
-    });
+    bot.sendMessage(chatId, `🗑 <b>${deleted.title}</b> o'chirildi.`, { parse_mode: "HTML" });
     return;
   }
 });
 
-// ===================== XATO =====================
-bot.on("polling_error", (err) => {
-  console.error("❌ Xato:", err.message);
-});
-
+bot.on("polling_error", (err) => { console.error("❌ Xato:", err.message); });
 console.log("🎬 Kino Bot ishga tushdi!");
