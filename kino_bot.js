@@ -40,6 +40,7 @@ function getUserCount() {
 }
 
 const adminState = {};
+const processedMessages = new Set();
 
 function isAdmin(id) {
   return id === ADMIN_ID;
@@ -48,7 +49,15 @@ function isAdmin(id) {
 // ===================== /start =====================
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
+  const messageId = msg.message_id;
   const name = msg.from.first_name || "Do'st";
+
+  // Duplicate xabarni blokirovka qilish
+  const key = `${chatId}_${msg.text}`;
+  if (processedMessages.has(key)) return;
+  processedMessages.add(key);
+  
+  setTimeout(() => processedMessages.delete(key), 5000);
 
   saveUser(chatId, name);
 
